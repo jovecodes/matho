@@ -69,6 +69,17 @@ impl Scope {
         }
     }
 
+    fn set_variable(&mut self, ident: &str, value: f64) -> Result<(), ()> {
+        if let Some(var) = self.variable.get_mut(ident) {
+            *var = value;
+            Ok(())
+        } else if let Some(parent) = &self.parent {
+            parent.borrow_mut().set_variable(ident, value)
+        } else {
+            Err(())
+        }
+    }
+
     fn get_function(&self, ident: &str) -> Option<Rc<RefCell<dyn Function>>> {
         if let Some(fun) = self.functions.get(ident) {
             Some(fun.clone())
@@ -93,6 +104,11 @@ fn builtin_sqrt(args: Vec<AstNode>, state: Rc<RefCell<Scope>>) -> f64 {
 fn builtin_ln(args: Vec<AstNode>, state: Rc<RefCell<Scope>>) -> f64 {
     assert!(args.len() == 1);
     eval(args[0].clone(), state).ln()
+}
+
+fn builtin_exit(args: Vec<AstNode>, state: Rc<RefCell<Scope>>) -> f64 {
+    assert!(args.len() == 1);
+    std::process::exit(eval(args[0].clone(), state) as i32)
 }
 
 fn main() {
@@ -121,6 +137,11 @@ fn main() {
                 Rc::new(RefCell::new(BuiltinFunction(builtin_ln as Fun)))
                     as Rc<RefCell<dyn Function>>,
             ),
+            (
+                "exit".to_string(),
+                Rc::new(RefCell::new(BuiltinFunction(builtin_exit as Fun)))
+                    as Rc<RefCell<dyn Function>>,
+            ),
         ]
         .into_iter()
         .collect(),
@@ -138,7 +159,9 @@ fn main() {
         }
         let result = eval(parser::parse(lexer::lex(&input)), state.clone());
 
-        println!("{}", result);
+        if result != f64::MAX {
+            println!("{}", result);
+        }
     }
 }
 
@@ -155,11 +178,11 @@ fn eval(ast: AstNode, state: Rc<RefCell<Scope>>) -> f64 {
             }
         }
         AstNode::Funcall(fun, args) => {
-            if let Some(val) = state.borrow().get_function(&fun) {
-                val.borrow().apply(args, state.clone())
-            } else {
-                panic!("Unknown function '{}'", fun)
-            }
+            let val = match state.borrow().get_function(&fun) {
+                Some(v) => v,
+                None => panic!("Unknown function '{}'", fun),
+            };
+            val.clone().borrow().apply(args, state.clone())
         }
         AstNode::LetStatement(stmt) => match stmt {
             parser::LetStatement::Function(ident, args, body) => {
@@ -167,7 +190,7 @@ fn eval(ast: AstNode, state: Rc<RefCell<Scope>>) -> f64 {
                     .borrow_mut()
                     .functions
                     .insert(ident, Rc::new(RefCell::new(UserFunction::new(args, *body))));
-                0.0
+                f64::MAX
             }
             parser::LetStatement::Variable(ident, expr) => {
                 let val = eval(*expr, state.clone());
@@ -175,5 +198,16 @@ fn eval(ast: AstNode, state: Rc<RefCell<Scope>>) -> f64 {
                 val
             }
         },
+        AstNode::Assignment(ident, expr) => {
+            let value = eval(*expr, state.clone());
+            state
+                .borrow_mut()
+                .set_variable(ident.as_str(), value)
+                .expect(&format!(
+                    "Could not assign variable '{}' because it does not exist!",
+                    ident
+                ));
+            state.borrow().get_variable(ident.as_str()).unwrap()
+        }
     }
 }

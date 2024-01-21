@@ -28,6 +28,7 @@ pub enum AstNode {
     Variable(String),
     Funcall(String, Vec<AstNode>),
     LetStatement(LetStatement),
+    Assignment(String, Box<AstNode>),
 }
 
 pub fn parse(input: Vec<Token>) -> AstNode {
@@ -125,11 +126,7 @@ pub fn parse_multiplicative(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
 pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
     match tokens.next() {
         Some(Token::Op(BinOp::Sub)) => {
-            let number = match tokens.next() {
-                Some(Token::Number(n)) => *n,
-                _ => panic!(),
-            };
-            AstNode::UnaryOp(UnaryOp::Neg, Box::new(AstNode::Number(number)))
+            AstNode::UnaryOp(UnaryOp::Neg, Box::new(parse_primary(tokens)))
         }
         Some(Token::LParen) => {
             let expr = parse_expr(tokens);
@@ -143,6 +140,7 @@ pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
             if let Some(Token::LParen) = tokens.peek() {
                 tokens.next();
                 if let Some(Token::RParen) = tokens.peek() {
+                    tokens.next();
                     AstNode::Funcall(ident.clone(), vec![])
                 } else {
                     let mut args = vec![parse_expr(tokens)];
@@ -156,8 +154,12 @@ pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
                             _ => panic!("{:?}", tokens.peek()),
                         }
                     }
+                    tokens.next();
                     AstNode::Funcall(ident.clone(), args)
                 }
+            } else if let Some(Token::Assign) = tokens.peek() {
+                tokens.next();
+                AstNode::Assignment(ident.clone(), Box::new(parse_expr(tokens)))
             } else {
                 AstNode::Variable(ident.clone())
             }
