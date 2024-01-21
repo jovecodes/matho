@@ -214,44 +214,6 @@ impl std::fmt::Display for Operator {
     }
 }
 
-impl Operator {
-    pub fn precedence(&self) -> usize {
-        use Operator::*;
-        // let op_prec = match operator {
-        //     "or" => (Or, 0),
-        //     "and" => (And, 0),
-        //     "<|" => (PipeLeft, 0),
-        //     "|>" => (PipeRight, 0),
-        //     "==" => (Eq, 1),
-        //     "<" => (Lt, 1),
-        //     ">" => (Gt, 1),
-        //     "!=" => (NEq, 1),
-        //     "<=" => (LtEq, 1),
-        //     ">=" => (GtEq, 1),
-        //     "+" => (Add, 2),
-        //     "-" => (Sub, 2),
-        //     "++" => (Concat, 2),
-        //     "*" => (Mul, 3),
-        //     "/" => (Div, 3),
-        //     "%" => (Mod, 3),
-        //     "^" => (Pow, 4),
-        //     _ => return None,
-        // };
-        match self {
-            Add => 2,
-            Sub => 2,
-            Mul => 3,
-            Div => 3,
-            Mod => 3,
-            Equality => 1,
-            Inequality => 1,
-            Reference => 10,
-            Pointer => 10,
-            _ => 0,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Clone)]
 pub struct Token {
     pub kind: TokenKind,
@@ -267,13 +229,6 @@ impl std::fmt::Display for Token {
 impl Token {
     pub fn new(kind: TokenKind, pos: Pos) -> Token {
         Token { kind, pos }
-    }
-
-    pub fn ident_string(&self) -> Result<String, ()> {
-        match &self.kind {
-            TokenKind::ID(id) => Ok(id.clone()),
-            _ => Err(()),
-        }
     }
 }
 
@@ -350,8 +305,8 @@ impl Lexer<'_> {
             }
             '(' => Some(self.token(TokenKind::LParen)),
             ')' => Some(self.token(TokenKind::RParen)),
-            '{' => Some(self.token(TokenKind::RCurly)),
-            '}' => Some(self.token(TokenKind::LCurly)),
+            '{' => Some(self.token(TokenKind::LCurly)),
+            '}' => Some(self.token(TokenKind::RCurly)),
             ';' => Some(self.token(TokenKind::Semi)),
             '.' => Some(self.token(TokenKind::Dot)),
             ':' => Some(self.token(TokenKind::Colon)),

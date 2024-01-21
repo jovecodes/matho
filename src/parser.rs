@@ -33,10 +33,51 @@ pub enum AstNode {
     Funcall(String, Vec<AstNode>),
     LetStatement(LetStatement),
     Assignment(String, Box<AstNode>),
+    Block(Vec<AstNode>),
+    Return(Box<AstNode>),
+    Items(Vec<AstNode>),
 }
 
 pub fn parse(input: Vec<Token>) -> AstNode {
     parse_expr(&mut input.iter().peekable())
+}
+
+pub fn parse_file(input: Vec<Token>) -> AstNode {
+    parse_items(&mut input.iter().peekable())
+}
+
+pub fn parse_items(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
+    let mut items = vec![];
+    while tokens.peek().unwrap().kind != TokenKind::EOF {
+        items.push(parse_item(tokens));
+    }
+    AstNode::Items(items)
+}
+
+// item ::= (statement | structure)
+pub fn parse_item(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
+    let statement = parse_expr(tokens);
+    match &statement {
+        AstNode::LetStatement(stmt) => match stmt {
+            LetStatement::Variable(_, _) => {
+                if tokens.peek().unwrap().kind != TokenKind::Semi {
+                    panic!("expected ';' but got {:?}", stmt);
+                } else {
+                    tokens.next();
+                }
+            }
+            _ => {}
+        },
+        AstNode::Funcall(_, _) => {
+            if tokens.peek().unwrap().kind != TokenKind::Semi {
+                panic!("expected ';' but got {:?}", tokens.next());
+            } else {
+                tokens.next();
+            }
+        }
+        _ => panic!("expected item but got {:?}", statement),
+    }
+    statement
 }
 
 // expression ::= equality-expression
@@ -49,8 +90,6 @@ pub fn parse_expr(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
 }
 
 // let-statement ::= (function | variable)
-// function ::= let ident(args) = expr
-// variable ::= let ident = expr
 pub fn parse_let_statement(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
     tokens.next();
     let ident = match &tokens.next().unwrap().kind {
@@ -59,34 +98,44 @@ pub fn parse_let_statement(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
     };
 
     if let TokenKind::LParen = tokens.peek().unwrap().kind {
-        tokens.next();
-        let mut args = vec![];
-        loop {
-            match &tokens.next().unwrap().kind {
-                TokenKind::RParen => break,
-                TokenKind::ID(ident) => args.push(ident.clone()),
-                TokenKind::Comma => {}
-                _ => panic!(),
-            }
-        }
-
-        match tokens.next().unwrap().kind {
-            TokenKind::Op(Operator::Eq) => {}
-            _ => panic!("expected '='"),
-        }
-
-        let body = parse_expr(tokens);
-        AstNode::LetStatement(LetStatement::Function(ident, args, Box::new(body)))
+        parse_function_definition(tokens, ident)
     } else {
-        let next = tokens.next().unwrap();
-        match next.kind {
-            TokenKind::Op(Operator::Eq) => {}
-            _ => panic!("expected '=' but got {next}"),
-        }
-
-        let value = parse_expr(tokens);
-        AstNode::LetStatement(LetStatement::Variable(ident, Box::new(value)))
+        parse_variable_definition(tokens, ident)
     }
+}
+
+// function ::= let ident(args) = expr
+fn parse_function_definition(tokens: &mut Peekable<Iter<'_, Token>>, ident: String) -> AstNode {
+    tokens.next();
+    let mut args = vec![];
+    loop {
+        match &tokens.next().unwrap().kind {
+            TokenKind::RParen => break,
+            TokenKind::ID(ident) => args.push(ident.clone()),
+            TokenKind::Comma => {}
+            _ => panic!(),
+        }
+    }
+
+    match tokens.next().unwrap().kind {
+        TokenKind::Op(Operator::Eq) => {}
+        _ => panic!("expected '='"),
+    }
+
+    let body = parse_expr(tokens);
+    AstNode::LetStatement(LetStatement::Function(ident, args, Box::new(body)))
+}
+
+// variable ::= let ident = expr
+fn parse_variable_definition(tokens: &mut Peekable<Iter<'_, Token>>, ident: String) -> AstNode {
+    let next = tokens.next().unwrap();
+    match next.kind {
+        TokenKind::Op(Operator::Eq) => {}
+        _ => panic!("expected '=' but got {next}"),
+    }
+
+    let value = parse_expr(tokens);
+    AstNode::LetStatement(LetStatement::Variable(ident, Box::new(value)))
 }
 
 // equality-expression ::= additive-expression ( ( '==' | '!=' ) additive-expression ) *
@@ -130,6 +179,25 @@ pub fn parse_multiplicative(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
     }
 
     node
+}
+
+fn parse_statement(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
+    let statement = parse_expr(tokens);
+    if tokens.peek().unwrap().kind == TokenKind::Semi {
+        tokens.next();
+        statement
+    } else {
+        AstNode::Return(Box::new(statement))
+    }
+}
+
+fn parse_block(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
+    let mut statements = vec![];
+    while tokens.peek().unwrap().kind != TokenKind::RCurly {
+        statements.push(parse_statement(tokens));
+    }
+    tokens.next();
+    AstNode::Block(statements)
 }
 
 // primary ::= '(' expression ')' | NUMBER | VARIABLE | '-' primary
@@ -177,6 +245,7 @@ pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
         }
         TokenKind::Number(n) => AstNode::Number(n.clone()),
         TokenKind::String(s) => AstNode::String(s.clone()),
+        TokenKind::LCurly => parse_block(tokens),
         _ => panic!("could not parse primary expression {next}"),
     }
 }
