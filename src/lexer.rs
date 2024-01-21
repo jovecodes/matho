@@ -31,6 +31,8 @@ impl BinOp {
 pub enum Token {
     Op(BinOp),
     Number(Number),
+    LParen,
+    RParen,
 }
 
 pub fn lex(input: &str) -> Vec<Token> {
@@ -42,11 +44,11 @@ pub fn lex(input: &str) -> Vec<Token> {
                 '0'..='9' => {
                     let mut num = String::from(c);
 
-                    while let Some(next) = chars.next() {
-                        if !next.is_ascii_digit() && next != '.' {
+                    while let Some(next) = chars.peek() {
+                        if !next.is_ascii_digit() && next != &'.' {
                             break;
                         }
-                        num.push(next);
+                        num.push(chars.next().unwrap());
                     }
                     if let Ok(n) = num.parse::<i64>() {
                         tokens.push(Token::Number(Number::Int(n)))
@@ -54,10 +56,14 @@ pub fn lex(input: &str) -> Vec<Token> {
                         tokens.push(Token::Number(Number::Float(n)))
                     }
                 }
-                ' ' => {}
+                ' ' | '\n' | '\t' | '\r' => {}
                 _ => {
                     if let Some(op) = BinOp::from_char(c) {
                         tokens.push(Token::Op(op));
+                    } else if c == '(' {
+                        tokens.push(Token::LParen);
+                    } else if c == ')' {
+                        tokens.push(Token::RParen);
                     } else {
                         panic!("Unexpected character '{c}'!");
                     }

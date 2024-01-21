@@ -15,13 +15,7 @@ fn main() {
         if input.trim().eq_ignore_ascii_case("quit") {
             break;
         }
-
-        // Parse input into AST
-        let tokens = lexer::lex(&input);
-        let ast = parser::parse(tokens);
-
-        // Evaluate AST
-        let result = eval(ast);
+        let result = eval(parser::parse(lexer::lex(&input)));
 
         println!("{}", result);
     }
@@ -30,9 +24,7 @@ fn main() {
 fn eval(ast: AstNode) -> f64 {
     match ast {
         AstNode::BinOp(op, lhs, rhs) => op.apply(eval(*lhs), eval(*rhs)),
-        AstNode::UnaryOp(op, node) => match op {
-            parser::UnaryOp::Neg => eval(*node) * -1.0,
-        },
+        AstNode::UnaryOp(op, node) => op.apply(eval(*node)),
         AstNode::Number(n) => n.into(),
     }
 }

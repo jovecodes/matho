@@ -6,6 +6,14 @@ pub enum UnaryOp {
     Neg,
 }
 
+impl UnaryOp {
+    pub fn apply(&self, n: f64) -> f64 {
+        match self {
+            UnaryOp::Neg => n * -1.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AstNode {
     BinOp(BinOp, Box<AstNode>, Box<AstNode>),
@@ -70,6 +78,14 @@ pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
                 _ => panic!(),
             };
             AstNode::UnaryOp(UnaryOp::Neg, Box::new(AstNode::Number(number)))
+        }
+        Some(Token::LParen) => {
+            let expr = parse_expr(tokens);
+            match tokens.next() {
+                Some(Token::RParen) => {}
+                _ => panic!(),
+            }
+            expr
         }
         Some(Token::Number(n)) => AstNode::Number(*n),
         _ => panic!("could not parse primary expression"),
