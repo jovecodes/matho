@@ -1,5 +1,5 @@
-use crate::lexer::{BinOp, Keyword, Number, Token};
-use std::{iter::Peekable, slice::Iter};
+use crate::lexer::{Keyword, Number, Operator, Token, TokenKind};
+use std::{iter::Peekable, ops::Neg, slice::Iter};
 
 #[derive(Debug, Clone, Copy)]
 pub enum UnaryOp {
@@ -7,9 +7,12 @@ pub enum UnaryOp {
 }
 
 impl UnaryOp {
-    pub fn apply(&self, n: f64) -> f64 {
+    pub fn apply<T>(self, n: T) -> T
+    where
+        T: Neg<Output = T>,
+    {
         match self {
-            UnaryOp::Neg => n * -1.0,
+            UnaryOp::Neg => -n,
         }
     }
 }
@@ -22,9 +25,10 @@ pub enum LetStatement {
 
 #[derive(Debug, Clone)]
 pub enum AstNode {
-    BinOp(BinOp, Box<AstNode>, Box<AstNode>),
+    BinOp(Operator, Box<AstNode>, Box<AstNode>),
     UnaryOp(UnaryOp, Box<AstNode>),
     Number(Number),
+    String(String),
     Variable(String),
     Funcall(String, Vec<AstNode>),
     LetStatement(LetStatement),
@@ -37,7 +41,7 @@ pub fn parse(input: Vec<Token>) -> AstNode {
 
 // expression ::= equality-expression
 pub fn parse_expr(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
-    if let Some(Token::Keyword(Keyword::Let)) = tokens.peek() {
+    if let TokenKind::Keyword(Keyword::Let) = tokens.peek().unwrap().kind {
         parse_let_statement(tokens)
     } else {
         parse_equality(tokens)
@@ -49,33 +53,35 @@ pub fn parse_expr(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
 // variable ::= let ident = expr
 pub fn parse_let_statement(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
     tokens.next();
-    let ident = match tokens.next().unwrap() {
-        Token::Ident(i) => i.clone(),
+    let ident = match &tokens.next().unwrap().kind {
+        TokenKind::ID(i) => i.clone(),
         _ => panic!(),
     };
-    if let Some(Token::LParen) = tokens.peek() {
+
+    if let TokenKind::LParen = tokens.peek().unwrap().kind {
         tokens.next();
         let mut args = vec![];
         loop {
-            match tokens.next() {
-                Some(Token::RParen) => break,
-                Some(Token::Ident(ident)) => args.push(ident.clone()),
-                Some(Token::Comma) => {}
+            match &tokens.next().unwrap().kind {
+                TokenKind::RParen => break,
+                TokenKind::ID(ident) => args.push(ident.clone()),
+                TokenKind::Comma => {}
                 _ => panic!(),
             }
         }
 
-        match tokens.next() {
-            Some(Token::Assign) => {}
+        match tokens.next().unwrap().kind {
+            TokenKind::Op(Operator::Eq) => {}
             _ => panic!("expected '='"),
         }
 
         let body = parse_expr(tokens);
         AstNode::LetStatement(LetStatement::Function(ident, args, Box::new(body)))
     } else {
-        match tokens.next() {
-            Some(Token::Assign) => {}
-            _ => panic!("expected '='"),
+        let next = tokens.next().unwrap();
+        match next.kind {
+            TokenKind::Op(Operator::Eq) => {}
+            _ => panic!("expected '=' but got {next}"),
         }
 
         let value = parse_expr(tokens);
@@ -92,10 +98,12 @@ pub fn parse_equality(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
 pub fn parse_additive(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
     let mut node = parse_multiplicative(tokens);
 
-    while let Some(Token::Op(BinOp::Add)) | Some(Token::Op(BinOp::Sub)) = tokens.peek() {
-        let op = match tokens.next().unwrap() {
-            Token::Op(BinOp::Add) => BinOp::Add,
-            Token::Op(BinOp::Sub) => BinOp::Sub,
+    while let TokenKind::Op(Operator::Add) | TokenKind::Op(Operator::Sub) =
+        tokens.peek().unwrap().kind
+    {
+        let op = match tokens.next().unwrap().kind {
+            TokenKind::Op(Operator::Add) => Operator::Add,
+            TokenKind::Op(Operator::Sub) => Operator::Sub,
             _ => panic!(),
         };
         let rhs = parse_multiplicative(tokens);
@@ -109,10 +117,12 @@ pub fn parse_additive(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
 pub fn parse_multiplicative(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
     let mut node = parse_primary(tokens);
 
-    while let Some(Token::Op(BinOp::Mul)) | Some(Token::Op(BinOp::Div)) = tokens.peek() {
-        let op = match tokens.next().unwrap() {
-            Token::Op(BinOp::Mul) => BinOp::Mul,
-            Token::Op(BinOp::Div) => BinOp::Div,
+    while let TokenKind::Op(Operator::Mul) | TokenKind::Op(Operator::Div) =
+        tokens.peek().unwrap().kind
+    {
+        let op = match tokens.next().unwrap().kind {
+            TokenKind::Op(Operator::Mul) => Operator::Mul,
+            TokenKind::Op(Operator::Div) => Operator::Div,
             _ => panic!(),
         };
         let rhs = parse_primary(tokens);
@@ -124,30 +134,31 @@ pub fn parse_multiplicative(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
 
 // primary ::= '(' expression ')' | NUMBER | VARIABLE | '-' primary
 pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
-    match tokens.next() {
-        Some(Token::Op(BinOp::Sub)) => {
+    let next = &tokens.next().unwrap();
+    match &next.kind {
+        TokenKind::Op(Operator::Sub) => {
             AstNode::UnaryOp(UnaryOp::Neg, Box::new(parse_primary(tokens)))
         }
-        Some(Token::LParen) => {
+        TokenKind::LParen => {
             let expr = parse_expr(tokens);
-            match tokens.next() {
-                Some(Token::RParen) => {}
+            match tokens.next().unwrap().kind {
+                TokenKind::RParen => {}
                 _ => panic!(),
             }
             expr
         }
-        Some(Token::Ident(ident)) => {
-            if let Some(Token::LParen) = tokens.peek() {
+        TokenKind::ID(ident) => {
+            if let TokenKind::LParen = tokens.peek().unwrap().kind {
                 tokens.next();
-                if let Some(Token::RParen) = tokens.peek() {
+                if let TokenKind::RParen = tokens.peek().unwrap().kind {
                     tokens.next();
                     AstNode::Funcall(ident.clone(), vec![])
                 } else {
                     let mut args = vec![parse_expr(tokens)];
                     loop {
-                        match tokens.peek() {
-                            Some(Token::RParen) => break,
-                            Some(Token::Comma) => {
+                        match tokens.peek().unwrap().kind {
+                            TokenKind::RParen => break,
+                            TokenKind::Comma => {
                                 tokens.next();
                                 args.push(parse_expr(tokens))
                             }
@@ -157,14 +168,15 @@ pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
                     tokens.next();
                     AstNode::Funcall(ident.clone(), args)
                 }
-            } else if let Some(Token::Assign) = tokens.peek() {
+            } else if let TokenKind::Op(Operator::Eq) = tokens.peek().unwrap().kind {
                 tokens.next();
                 AstNode::Assignment(ident.clone(), Box::new(parse_expr(tokens)))
             } else {
                 AstNode::Variable(ident.clone())
             }
         }
-        Some(Token::Number(n)) => AstNode::Number(*n),
-        _ => panic!("could not parse primary expression"),
+        TokenKind::Number(n) => AstNode::Number(n.clone()),
+        TokenKind::String(s) => AstNode::String(s.clone()),
+        _ => panic!("could not parse primary expression {next}"),
     }
 }
