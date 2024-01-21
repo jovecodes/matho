@@ -1,4 +1,4 @@
-use crate::lexer::{BinOp, Number, Token};
+use crate::lexer::{BinOp, Keyword, Number, Token};
 use std::{iter::Peekable, slice::Iter};
 
 #[derive(Debug, Clone, Copy)]
@@ -15,10 +15,19 @@ impl UnaryOp {
 }
 
 #[derive(Debug, Clone)]
+pub enum LetStatement {
+    Function(String, Vec<String>, Box<AstNode>),
+    Variable(String, Box<AstNode>),
+}
+
+#[derive(Debug, Clone)]
 pub enum AstNode {
     BinOp(BinOp, Box<AstNode>, Box<AstNode>),
     UnaryOp(UnaryOp, Box<AstNode>),
     Number(Number),
+    Variable(String),
+    Funcall(String, Vec<AstNode>),
+    LetStatement(LetStatement),
 }
 
 pub fn parse(input: Vec<Token>) -> AstNode {
@@ -27,7 +36,50 @@ pub fn parse(input: Vec<Token>) -> AstNode {
 
 // expression ::= equality-expression
 pub fn parse_expr(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
-    parse_equality(tokens)
+    if let Some(Token::Keyword(Keyword::Let)) = tokens.peek() {
+        parse_let_statement(tokens)
+    } else {
+        parse_equality(tokens)
+    }
+}
+
+// let-statement ::= (function | variable)
+// function ::= let ident(args) = expr
+// variable ::= let ident = expr
+pub fn parse_let_statement(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
+    tokens.next();
+    let ident = match tokens.next().unwrap() {
+        Token::Ident(i) => i.clone(),
+        _ => panic!(),
+    };
+    if let Some(Token::LParen) = tokens.peek() {
+        tokens.next();
+        let mut args = vec![];
+        loop {
+            match tokens.next() {
+                Some(Token::RParen) => break,
+                Some(Token::Ident(ident)) => args.push(ident.clone()),
+                Some(Token::Comma) => {}
+                _ => panic!(),
+            }
+        }
+
+        match tokens.next() {
+            Some(Token::Assign) => {}
+            _ => panic!("expected '='"),
+        }
+
+        let body = parse_expr(tokens);
+        AstNode::LetStatement(LetStatement::Function(ident, args, Box::new(body)))
+    } else {
+        match tokens.next() {
+            Some(Token::Assign) => {}
+            _ => panic!("expected '='"),
+        }
+
+        let value = parse_expr(tokens);
+        AstNode::LetStatement(LetStatement::Variable(ident, Box::new(value)))
+    }
 }
 
 // equality-expression ::= additive-expression ( ( '==' | '!=' ) additive-expression ) *
@@ -86,6 +138,29 @@ pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
                 _ => panic!(),
             }
             expr
+        }
+        Some(Token::Ident(ident)) => {
+            if let Some(Token::LParen) = tokens.peek() {
+                tokens.next();
+                if let Some(Token::RParen) = tokens.peek() {
+                    AstNode::Funcall(ident.clone(), vec![])
+                } else {
+                    let mut args = vec![parse_expr(tokens)];
+                    loop {
+                        match tokens.peek() {
+                            Some(Token::RParen) => break,
+                            Some(Token::Comma) => {
+                                tokens.next();
+                                args.push(parse_expr(tokens))
+                            }
+                            _ => panic!("{:?}", tokens.peek()),
+                        }
+                    }
+                    AstNode::Funcall(ident.clone(), args)
+                }
+            } else {
+                AstNode::Variable(ident.clone())
+            }
         }
         Some(Token::Number(n)) => AstNode::Number(*n),
         _ => panic!("could not parse primary expression"),
