@@ -236,11 +236,50 @@ pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
                     tokens.next();
                     AstNode::Funcall(ident.clone(), args)
                 }
-            } else if let TokenKind::Op(Operator::Eq) = tokens.peek().unwrap().kind {
-                tokens.next();
-                AstNode::Assignment(ident.clone(), Box::new(parse_expr(tokens)))
             } else {
-                AstNode::Variable(ident.clone())
+                match tokens.peek().unwrap().kind {
+                    TokenKind::Op(Operator::Eq) => {
+                        tokens.next();
+                        AstNode::Assignment(ident.clone(), Box::new(parse_expr(tokens)))
+                    }
+                    TokenKind::Op(Operator::AddEq) => {
+                        tokens.next();
+                        let expr = AstNode::BinOp(
+                            Operator::Add,
+                            Box::new(AstNode::Variable(ident.clone())),
+                            Box::new(parse_expr(tokens)),
+                        );
+                        AstNode::Assignment(ident.clone(), Box::new(expr))
+                    }
+                    TokenKind::Op(Operator::SubEq) => {
+                        tokens.next();
+                        let expr = AstNode::BinOp(
+                            Operator::Sub,
+                            Box::new(AstNode::Variable(ident.clone())),
+                            Box::new(parse_expr(tokens)),
+                        );
+                        AstNode::Assignment(ident.clone(), Box::new(expr))
+                    }
+                    TokenKind::Op(Operator::MulEq) => {
+                        tokens.next();
+                        let expr = AstNode::BinOp(
+                            Operator::Mul,
+                            Box::new(AstNode::Variable(ident.clone())),
+                            Box::new(parse_expr(tokens)),
+                        );
+                        AstNode::Assignment(ident.clone(), Box::new(expr))
+                    }
+                    TokenKind::Op(Operator::DivEq) => {
+                        tokens.next();
+                        let expr = AstNode::BinOp(
+                            Operator::Div,
+                            Box::new(AstNode::Variable(ident.clone())),
+                            Box::new(parse_expr(tokens)),
+                        );
+                        AstNode::Assignment(ident.clone(), Box::new(expr))
+                    }
+                    _ => AstNode::Variable(ident.clone()),
+                }
             }
         }
         TokenKind::Number(n) => AstNode::Number(n.clone()),

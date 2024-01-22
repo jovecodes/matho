@@ -252,21 +252,21 @@ impl Lexer<'_> {
             }
             '-' => {
                 if self.chars.next_if(|x| x == &'=').is_some() {
-                    Some(self.token(TokenKind::Op(Operator::Sub)))
+                    Some(self.token(TokenKind::Op(Operator::SubEq)))
                 } else {
                     Some(self.token(TokenKind::Op(Operator::Sub)))
                 }
             }
             '*' => {
                 if self.chars.next_if(|x| x == &'=').is_some() {
-                    Some(self.token(TokenKind::Op(Operator::Mul)))
+                    Some(self.token(TokenKind::Op(Operator::MulEq)))
                 } else {
                     Some(self.token(TokenKind::Op(Operator::Mul)))
                 }
             }
             '/' => {
                 if self.chars.next_if(|x| x == &'=').is_some() {
-                    Some(self.token(TokenKind::Op(Operator::Div)))
+                    Some(self.token(TokenKind::Op(Operator::DivEq)))
                 } else if self.chars.next_if(|x| x == &'/').is_some() {
                     loop {
                         if let Some(next) = self.chars.next() {
