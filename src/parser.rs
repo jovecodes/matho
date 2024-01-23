@@ -1,5 +1,5 @@
 use crate::lexer::{Keyword, Number, Operator, Token, TokenKind};
-use std::{iter::Peekable, ops::Neg, slice::Iter};
+use std::{fmt::Display, iter::Peekable, ops::Neg, slice::Iter};
 
 #[derive(Debug, Clone, Copy)]
 pub enum UnaryOp {
@@ -18,8 +18,25 @@ impl UnaryOp {
 }
 
 #[derive(Debug, Clone)]
+pub struct Field {
+    pub ident: String,
+    pub kind: Option<String>,
+}
+
+impl Display for Field {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let kind_str = match &self.kind {
+            Some(k) => k,
+            None => "any",
+        };
+        let name = &self.ident;
+        write!(f, "{name}: {kind_str}")
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum LetStatement {
-    Function(String, Vec<String>, Box<AstNode>),
+    Function(String, Vec<Field>, Box<AstNode>),
     Variable(String, Box<AstNode>),
 }
 
@@ -36,10 +53,21 @@ pub enum AstNode {
     Block(Vec<AstNode>),
     Return(Box<AstNode>),
     Items(Vec<AstNode>),
+    Struct(Vec<Field>),
+    Bool(bool),
 }
 
 pub fn parse(input: Vec<Token>) -> AstNode {
-    parse_expr(&mut input.iter().peekable())
+    let mut tokens = input.iter().peekable();
+    let res = parse_expr(&mut tokens);
+    match tokens.next() {
+        Some(token) => match token.kind {
+            TokenKind::EOF => {}
+            _ => panic!("expected EOF but got {token}"),
+        },
+        None => {}
+    }
+    res
 }
 
 pub fn parse_file(input: Vec<Token>) -> AstNode {
@@ -82,11 +110,22 @@ pub fn parse_item(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
 
 // expression ::= equality-expression
 pub fn parse_expr(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
-    if let TokenKind::Keyword(Keyword::Let) = tokens.peek().unwrap().kind {
+    let peek = &tokens.peek().unwrap().kind;
+    if let TokenKind::Keyword(Keyword::Let) = peek {
         parse_let_statement(tokens)
+    } else if let TokenKind::Keyword(Keyword::Struct) = peek {
+        parse_struct(tokens)
     } else {
         parse_equality(tokens)
     }
+}
+
+// struct ::= struct( (field,)* (field)? )
+pub fn parse_struct(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
+    tokens.next(); // struct
+    tokens.next(); // (
+    let fields = parse_fields(tokens);
+    AstNode::Struct(fields)
 }
 
 // let-statement ::= (function | variable)
@@ -104,18 +143,31 @@ pub fn parse_let_statement(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
     }
 }
 
+fn parse_fields(tokens: &mut Peekable<Iter<'_, Token>>) -> Vec<Field> {
+    let mut args = vec![];
+    loop {
+        let current = &tokens.next().unwrap();
+        match &current.kind {
+            TokenKind::RParen => break,
+            TokenKind::ID(ident) => args.push(Field {
+                ident: ident.clone(),
+                kind: None,
+            }),
+            TokenKind::Comma => {}
+            TokenKind::Colon => {
+                args.last_mut().unwrap().kind = Some(parse_type(tokens));
+            }
+            _ => panic!("expected field but got {current}"),
+        }
+    }
+    args
+}
+
 // function ::= let ident(args) = expr
 fn parse_function_definition(tokens: &mut Peekable<Iter<'_, Token>>, ident: String) -> AstNode {
     tokens.next();
-    let mut args = vec![];
-    loop {
-        match &tokens.next().unwrap().kind {
-            TokenKind::RParen => break,
-            TokenKind::ID(ident) => args.push(ident.clone()),
-            TokenKind::Comma => {}
-            _ => panic!(),
-        }
-    }
+
+    let args = parse_fields(tokens);
 
     match tokens.next().unwrap().kind {
         TokenKind::Op(Operator::Eq) => {}
@@ -124,6 +176,18 @@ fn parse_function_definition(tokens: &mut Peekable<Iter<'_, Token>>, ident: Stri
 
     let body = parse_expr(tokens);
     AstNode::LetStatement(LetStatement::Function(ident, args, Box::new(body)))
+}
+
+fn parse_type(tokens: &mut Peekable<Iter<'_, Token>>) -> String {
+    let token = &tokens.next().unwrap().kind;
+    match token {
+        TokenKind::ID(id) => id.clone(),
+        TokenKind::Keyword(Keyword::Int) => "int".to_owned(),
+        TokenKind::Keyword(Keyword::Float) => "float".to_owned(),
+        TokenKind::Keyword(Keyword::Bool) => "bool".to_owned(),
+        TokenKind::Keyword(Keyword::String) => "string".to_owned(),
+        _ => panic!("expected type but got {token}",),
+    }
 }
 
 // variable ::= let ident = expr
@@ -207,6 +271,8 @@ pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
         TokenKind::Op(Operator::Sub) => {
             AstNode::UnaryOp(UnaryOp::Neg, Box::new(parse_primary(tokens)))
         }
+        TokenKind::Keyword(Keyword::True) => AstNode::Bool(true),
+        TokenKind::Keyword(Keyword::False) => AstNode::Bool(false),
         TokenKind::LParen => {
             let expr = parse_expr(tokens);
             match tokens.next().unwrap().kind {

@@ -1,6 +1,1 @@
-let x = 10;
-
-let Vec2 = struct {
-    x,
-    y
-}
+let Vec2 = struct(x: int, y: int);

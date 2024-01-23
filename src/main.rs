@@ -1,6 +1,6 @@
 use dyn_fmt::AsStrFormatExt;
 use lexer::Number;
-use parser::AstNode;
+use parser::{AstNode, Field};
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -23,13 +23,18 @@ trait Function {
 }
 
 struct UserFunction {
-    args: Vec<String>,
+    args: Vec<Field>,
     body: AstNode,
     name: String,
 }
 
 impl UserFunction {
-    fn new(args: Vec<String>, body: AstNode, name: String) -> Self {
+    fn new(args: Vec<Field>, body: AstNode, name: String, scope: &Scope) -> Self {
+        for arg in &args {
+            if arg.kind.is_some() && scope.get_structure(&arg.kind.as_ref().unwrap()).is_none() {
+                panic!("Unknown type {}", arg.ident);
+            }
+        }
         Self { args, body, name }
     }
 }
@@ -46,11 +51,24 @@ impl Function for UserFunction {
         }
         let mut variables = HashMap::new();
         for (i, arg) in self.args.iter().enumerate() {
-            variables.insert(arg.clone(), eval(args[i].clone(), state.clone()));
+            let evaled_arg = eval(args[i].clone(), state.clone());
+            if arg.kind.is_some() {
+                let kind = arg.kind.as_ref().unwrap();
+                if &evaled_arg.type_name() != kind {
+                    panic!(
+                        "Argument '{}' is of type '{}' but was expected to be of type '{}'",
+                        evaled_arg,
+                        evaled_arg.type_name(),
+                        kind
+                    )
+                }
+            }
+            variables.insert(arg.ident.clone(), evaled_arg);
         }
         let scope = Rc::new(RefCell::new(Scope {
             variables,
             functions: HashMap::new(),
+            structures: HashMap::new(),
             parent: Some(state),
         }));
         eval(self.body.clone(), scope)
@@ -67,9 +85,11 @@ impl Function for BuiltinFunction {
     }
 }
 
+#[derive(Default)]
 struct Scope {
     variables: HashMap<String, Type>,
     functions: HashMap<String, Rc<RefCell<dyn Function>>>,
+    structures: HashMap<String, Rc<RefCell<Vec<Field>>>>,
     parent: Option<Rc<RefCell<Scope>>>,
 }
 
@@ -104,11 +124,38 @@ impl Scope {
             None
         }
     }
+
+    fn get_structure(&self, ident: &str) -> Option<Rc<RefCell<Vec<Field>>>> {
+        if let Some(structure) = self.structures.get(ident) {
+            Some(structure.clone())
+        } else if let Some(parent) = &self.parent {
+            parent.borrow().get_structure(ident)
+        } else {
+            None
+        }
+    }
 }
 
 fn builtin_dbg_echo(args: Vec<AstNode>, state: Rc<RefCell<Scope>>) -> Type {
-    println!("{:?}", args);
-    eval(args[0].clone(), state)
+    assert!(args.len() == 1);
+    let input = match args.first().unwrap() {
+        AstNode::String(string) => string,
+        _ => panic!("dbg_echo expects only a string"),
+    };
+
+    let scope = Rc::new(RefCell::new(Scope {
+        parent: Some(state.clone()),
+        ..Default::default()
+    }));
+
+    let tokens = lexer::Lexer::load(&input).tokens;
+    println!("Tokens: {tokens:?}");
+    let ast = parser::parse(tokens);
+    println!("Ast: {ast:?}");
+    let result = eval(ast, scope);
+    println!("Result: {result}");
+
+    Type::Void
 }
 
 fn builtin_fmt(args: Vec<AstNode>, state: Rc<RefCell<Scope>>) -> Type {
@@ -179,70 +226,45 @@ fn builtin_use(args: Vec<AstNode>, state: Rc<RefCell<Scope>>) -> Type {
     let file = fs::read_to_string(path.clone()).expect(&format!("Could not open file {path}!"));
     let tokens = lexer::Lexer::load(&file).tokens;
     let ast = parser::parse_file(tokens);
-    eval(ast, state)
+    eval(ast, state.clone())
 }
 
-// fn builtin_do_file(args: Vec<AstNode>, state: Rc<RefCell<Scope>>) -> f64 {
-//     assert!(args.len() == 1);
-//     let input = "";
-//     let result = eval(parser::parse(lexer::lex(&input)), state.clone());
-//     std::process::exit(eval(args[0].clone(), state) as i32)
-// }
+fn add_builtin_fn(name: &str, fun: Fun) -> (String, Rc<RefCell<dyn Function>>) {
+    (
+        name.to_string(),
+        Rc::new(RefCell::new(BuiltinFunction(fun))) as Rc<RefCell<dyn Function>>,
+    )
+}
+
+fn add_builtin_constant(name: &str, num: f64) -> (String, Type) {
+    (name.to_string(), Type::Number(Number::Float(num)))
+}
 
 fn main() {
     let state = Rc::new(RefCell::new(Scope {
         variables: vec![
-            ("pi".to_string(), Type::Number(Number::Float(consts::PI))),
-            ("e".to_string(), Type::Number(Number::Float(consts::E))),
-            ("tau".to_string(), Type::Number(Number::Float(consts::TAU))),
-            ("phi".to_string(), Type::Number(Number::Float(PHI))),
+            add_builtin_constant("pi", consts::PI),
+            add_builtin_constant("e", consts::E),
+            add_builtin_constant("tau", consts::TAU),
+            add_builtin_constant("phi", PHI),
         ]
         .into_iter()
         .collect(),
         functions: vec![
-            (
-                "dbg_echo".to_string(),
-                Rc::new(RefCell::new(BuiltinFunction(builtin_dbg_echo as Fun)))
-                    as Rc<RefCell<dyn Function>>,
-            ),
-            (
-                "print".to_string(),
-                Rc::new(RefCell::new(BuiltinFunction(builtin_print as Fun)))
-                    as Rc<RefCell<dyn Function>>,
-            ),
-            (
-                "println".to_string(),
-                Rc::new(RefCell::new(BuiltinFunction(builtin_println as Fun)))
-                    as Rc<RefCell<dyn Function>>,
-            ),
-            (
-                "fmt".to_string(),
-                Rc::new(RefCell::new(BuiltinFunction(builtin_fmt as Fun)))
-                    as Rc<RefCell<dyn Function>>,
-            ),
-            (
-                "sqrt".to_string(),
-                Rc::new(RefCell::new(BuiltinFunction(builtin_sqrt as Fun)))
-                    as Rc<RefCell<dyn Function>>,
-            ),
-            (
-                "ln".to_string(),
-                Rc::new(RefCell::new(BuiltinFunction(builtin_ln as Fun)))
-                    as Rc<RefCell<dyn Function>>,
-            ),
-            (
-                "exit".to_string(),
-                Rc::new(RefCell::new(BuiltinFunction(builtin_exit as Fun)))
-                    as Rc<RefCell<dyn Function>>,
-            ),
-            (
-                "use".to_string(),
-                Rc::new(RefCell::new(BuiltinFunction(builtin_use as Fun)))
-                    as Rc<RefCell<dyn Function>>,
-            ),
+            add_builtin_fn("dbg_echo", builtin_dbg_echo),
+            add_builtin_fn("print", builtin_print),
+            add_builtin_fn("println", builtin_println),
+            add_builtin_fn("fmt", builtin_fmt),
+            add_builtin_fn("sqrt", builtin_sqrt),
+            add_builtin_fn("ln", builtin_ln),
+            add_builtin_fn("exit", builtin_exit),
+            add_builtin_fn("use", builtin_use),
         ]
         .into_iter()
         .collect(),
+        structures: vec![("type".to_string(), Rc::new(RefCell::new(vec![])))]
+            .into_iter()
+            .collect(),
         parent: None,
     }));
     loop {
@@ -260,16 +282,10 @@ fn main() {
             state.clone(),
         );
 
-        println!("{}", result);
-    }
-}
-
-#[derive(Debug, Clone)]
-struct UserType {}
-
-impl Display for UserType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        if let Type::Void = result {
+        } else {
+            println!("{}", result);
+        }
     }
 }
 
@@ -277,8 +293,43 @@ impl Display for UserType {
 enum Type {
     Number(Number),
     String(String),
-    UserType(UserType),
+    Bool(bool),
+    StructDefinition(Vec<Field>),
+    StructInstance(String, HashMap<String, Type>),
+    Any,
     Void,
+}
+
+impl Type {
+    fn type_name(&self) -> String {
+        match self {
+            Type::Number(n) => match n {
+                Number::Int(_) => "int".to_owned(),
+                Number::Float(_) => "float".to_owned(),
+            },
+            Type::String(_) => "string".to_owned(),
+            Type::Bool(_) => "bool".to_owned(),
+            Type::Void => "void".to_owned(),
+            Type::StructDefinition(s) => format!("{:?}", s),
+            Type::Any => "any".to_owned(),
+            Type::StructInstance(name, _) => name.clone(),
+        }
+    }
+
+    fn default_from_name(name: Option<String>) -> Self {
+        if name.is_none() {
+            return Type::Any;
+        }
+        match name.as_ref().unwrap().as_str() {
+            "string" => Self::String(String::new()),
+            "int" => Self::Number(Number::Int(0)),
+            "float" => Self::Number(Number::Float(0.0)),
+            "bool" => Self::Bool(false),
+            "void" => Self::Void,
+            "any" => Self::Any,
+            _ => panic!(),
+        }
+    }
 }
 
 impl Display for Type {
@@ -286,8 +337,31 @@ impl Display for Type {
         match self {
             Type::Number(n) => write!(f, "{}", n),
             Type::String(s) => write!(f, "{}", s),
+            Type::Bool(b) => write!(f, "{}", b),
             Type::Void => write!(f, "void"),
-            Type::UserType(t) => write!(f, "{}", t),
+            Type::StructDefinition(fields) => {
+                write!(f, "struct(").unwrap();
+                for (i, field) in fields.iter().enumerate() {
+                    if i != fields.len() - 1 {
+                        write!(f, "{field}, ").unwrap();
+                    } else {
+                        write!(f, "{field}").unwrap();
+                    }
+                }
+                write!(f, ")")
+            }
+            Type::Any => write!(f, "any"),
+            Type::StructInstance(name, fields) => {
+                write!(f, "{name}(").unwrap();
+                for (i, (field, value)) in fields.iter().enumerate() {
+                    if i != fields.len() - 1 {
+                        write!(f, "{field} = {value}, ").unwrap();
+                    } else {
+                        write!(f, "{field} = {value}").unwrap();
+                    }
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -306,7 +380,10 @@ impl ops::Add for Type {
                 _ => panic!(),
             },
             Type::Void => todo!(),
-            Type::UserType(_) => todo!(),
+            Type::Bool(_) => todo!(),
+            Type::StructDefinition(_) => todo!(),
+            Type::Any => todo!(),
+            Type::StructInstance(_, _) => todo!(),
         }
     }
 }
@@ -322,7 +399,10 @@ impl ops::Sub for Type {
             },
             Type::String(_) => todo!(),
             Type::Void => todo!(),
-            Type::UserType(_) => todo!(),
+            Type::Bool(_) => todo!(),
+            Type::StructDefinition(_) => todo!(),
+            Type::Any => todo!(),
+            Type::StructInstance(_, _) => todo!(),
         }
     }
 }
@@ -338,7 +418,10 @@ impl ops::Mul for Type {
             },
             Type::String(_) => todo!(),
             Type::Void => todo!(),
-            Type::UserType(_) => todo!(),
+            Type::Bool(_) => todo!(),
+            Type::StructDefinition(_) => todo!(),
+            Type::Any => todo!(),
+            Type::StructInstance(_, _) => todo!(),
         }
     }
 }
@@ -354,7 +437,10 @@ impl ops::Div for Type {
             },
             Type::String(_) => todo!(),
             Type::Void => todo!(),
-            Type::UserType(_) => todo!(),
+            Type::Bool(_) => todo!(),
+            Type::StructDefinition(_) => todo!(),
+            Type::Any => todo!(),
+            Type::StructInstance(_, _) => todo!(),
         }
     }
 }
@@ -375,6 +461,7 @@ fn eval(ast: AstNode, state: Rc<RefCell<Scope>>) -> Type {
         AstNode::BinOp(op, lhs, rhs) => op.apply(eval(*lhs, state.clone()), eval(*rhs, state)),
         AstNode::UnaryOp(op, node) => op.apply(eval(*node, state)),
         AstNode::Number(n) => Type::Number(n),
+        AstNode::Bool(b) => Type::Bool(b),
         AstNode::Variable(var) => {
             if let Some(val) = state.borrow().get_variable(&var) {
                 val
@@ -383,18 +470,43 @@ fn eval(ast: AstNode, state: Rc<RefCell<Scope>>) -> Type {
             }
         }
         AstNode::Funcall(fun, args) => {
-            let val = match state.borrow().get_function(&fun) {
-                Some(v) => v,
-                None => panic!("Unknown function '{}'", fun),
-            };
-            val.clone().borrow().apply(args, state.clone())
+            if let Some(f) = state.borrow().get_function(&fun) {
+                f.borrow().apply(args, state.clone())
+            } else if let Some(v) = state.borrow().get_variable(&fun) {
+                match v {
+                    Type::StructDefinition(fields) => {
+                        let mut variables = HashMap::new();
+                        for field in fields {
+                            variables.insert(field.ident, Type::default_from_name(field.kind));
+                        }
+
+                        let scope = Rc::new(RefCell::new(Scope {
+                            variables,
+                            parent: Some(state.clone()),
+                            ..Default::default()
+                        }));
+
+                        for arg in args {
+                            eval(arg, scope.clone());
+                        }
+
+                        Type::StructInstance(fun, scope.clone().borrow().variables.clone())
+                    }
+                    _ => panic!(),
+                }
+            } else {
+                panic!("Unknown function '{}'", fun)
+            }
         }
         AstNode::LetStatement(stmt) => match stmt {
             parser::LetStatement::Function(ident, args, body) => {
-                state.borrow_mut().functions.insert(
+                let definition = Rc::new(RefCell::new(UserFunction::new(
+                    args,
+                    *body,
                     ident.clone(),
-                    Rc::new(RefCell::new(UserFunction::new(args, *body, ident))),
-                );
+                    &state.borrow(),
+                )));
+                state.borrow_mut().functions.insert(ident, definition);
                 Type::Void
             }
             parser::LetStatement::Variable(ident, expr) => {
@@ -417,9 +529,8 @@ fn eval(ast: AstNode, state: Rc<RefCell<Scope>>) -> Type {
         AstNode::String(s) => Type::String(s),
         AstNode::Block(b) => {
             let inner_scope = Rc::new(RefCell::new(Scope {
-                variables: HashMap::new(),
-                functions: HashMap::new(),
                 parent: Some(state),
+                ..Default::default()
             }));
             for stmt in b {
                 match stmt {
@@ -438,5 +549,6 @@ fn eval(ast: AstNode, state: Rc<RefCell<Scope>>) -> Type {
             }
             Type::Void
         }
+        AstNode::Struct(fields) => Type::StructDefinition(fields),
     }
 }

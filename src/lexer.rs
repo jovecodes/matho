@@ -84,7 +84,7 @@ pub enum Keyword {
     Float,
     Bool,
     Char,
-    Str,
+    String,
     Return,
     Void,
     Break,
@@ -106,7 +106,7 @@ impl std::fmt::Display for Keyword {
             Float => write!(f, "float"),
             Bool => write!(f, "bool"),
             Char => write!(f, "char"),
-            Str => write!(f, "str"),
+            String => write!(f, "string"),
             Return => write!(f, "return"),
             Void => write!(f, "void"),
             Break => write!(f, "break"),
@@ -133,7 +133,7 @@ impl std::str::FromStr for Keyword {
             "float" => Ok(Float),
             "bool" => Ok(Bool),
             "char" => Ok(Char),
-            "str" => Ok(Str),
+            "string" => Ok(String),
             "return" => Ok(Return),
             "void" => Ok(Void),
             "break" => Ok(Break),
@@ -222,7 +222,7 @@ pub struct Token {
 
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Token(`{}`, {})", self.kind, self.pos)
+        write!(f, "Token({}, {})", self.kind, self.pos)
     }
 }
 
