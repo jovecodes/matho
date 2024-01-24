@@ -1,7 +1,7 @@
 pub use crate::pos::Pos;
 use std::fmt::Display;
 use std::iter::Peekable;
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, Div, Mul, Rem, Sub};
 use std::str::Chars;
 use std::str::FromStr;
 
@@ -156,6 +156,7 @@ pub enum Operator {
     Mul,
     Div,
     Mod,
+    Not,
     Eq,
     AddEq,
     SubEq,
@@ -170,16 +171,14 @@ pub enum Operator {
 impl Operator {
     pub fn apply<T>(self, lhs: T, rhs: T) -> T
     where
-        T: Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T>, // + PartialEq
-                                                                                  // + Eq
-                                                                                  // + Copy,
+        T: Add<Output = T> + Sub<Output = T> + Mul<Output = T> + Div<Output = T> + Rem<Output = T>,
     {
         match self {
             Operator::Add => lhs + rhs,
             Operator::Sub => lhs - rhs,
             Operator::Mul => lhs * rhs,
             Operator::Div => lhs / rhs,
-            Operator::Mod => todo!(),
+            Operator::Mod => lhs % rhs,
             Operator::Eq => todo!(),
             Operator::AddEq => todo!(),
             Operator::SubEq => todo!(),
@@ -189,6 +188,7 @@ impl Operator {
             Operator::Equality => todo!(),
             Operator::Inequality => todo!(),
             Operator::Reference => todo!(),
+            Operator::Not => todo!(),
         }
     }
 }
@@ -210,6 +210,7 @@ impl std::fmt::Display for Operator {
             Operator::Equality => write!(f, "=="),
             Operator::Inequality => write!(f, "!="),
             Operator::Reference => write!(f, "&"),
+            Operator::Not => write!(f, "!"),
         }
     }
 }
@@ -296,11 +297,25 @@ impl Lexer<'_> {
                     Some(self.token(TokenKind::Op(Operator::Div)))
                 }
             }
+            '%' => {
+                if self.chars.next_if(|x| x == &'=').is_some() {
+                    Some(self.token(TokenKind::Op(Operator::ModEq)))
+                } else {
+                    Some(self.token(TokenKind::Op(Operator::Mod)))
+                }
+            }
             '=' => {
                 if self.chars.next_if(|x| x == &'=').is_some() {
                     Some(self.token(TokenKind::Op(Operator::Equality)))
                 } else {
                     Some(self.token(TokenKind::Op(Operator::Eq)))
+                }
+            }
+            '!' => {
+                if self.chars.next_if(|x| x == &'=').is_some() {
+                    Some(self.token(TokenKind::Op(Operator::Inequality)))
+                } else {
+                    Some(self.token(TokenKind::Op(Operator::Not)))
                 }
             }
             '(' => Some(self.token(TokenKind::LParen)),

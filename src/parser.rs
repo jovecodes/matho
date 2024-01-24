@@ -43,7 +43,9 @@ pub enum LetStatement {
 #[derive(Debug, Clone)]
 pub enum AstNode {
     BinOp(Operator, Box<AstNode>, Box<AstNode>),
+    Compare(Operator, Box<AstNode>, Box<AstNode>),
     UnaryOp(UnaryOp, Box<AstNode>),
+    Access(String, String),
     Number(Number),
     String(String),
     Variable(String),
@@ -204,7 +206,19 @@ fn parse_variable_definition(tokens: &mut Peekable<Iter<'_, Token>>, ident: Stri
 
 // equality-expression ::= additive-expression ( ( '==' | '!=' ) additive-expression ) *
 pub fn parse_equality(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
-    parse_additive(tokens)
+    let mut node = parse_additive(tokens);
+    while let TokenKind::Op(Operator::Equality) | TokenKind::Op(Operator::Inequality) =
+        tokens.peek().unwrap().kind
+    {
+        let op = match tokens.next().unwrap().kind {
+            TokenKind::Op(Operator::Equality) => Operator::Equality,
+            TokenKind::Op(Operator::Inequality) => Operator::Inequality,
+            _ => panic!(),
+        };
+        let rhs = parse_additive(tokens);
+        node = AstNode::Compare(op, Box::new(node), Box::new(rhs));
+    }
+    node
 }
 
 // additive-expression ::= multiplicative-expression ( ( '+' | '-' ) multiplicative-expression ) *
@@ -230,12 +244,14 @@ pub fn parse_additive(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
 pub fn parse_multiplicative(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
     let mut node = parse_primary(tokens);
 
-    while let TokenKind::Op(Operator::Mul) | TokenKind::Op(Operator::Div) =
-        tokens.peek().unwrap().kind
+    while let TokenKind::Op(Operator::Mul)
+    | TokenKind::Op(Operator::Div)
+    | TokenKind::Op(Operator::Mod) = tokens.peek().unwrap().kind
     {
         let op = match tokens.next().unwrap().kind {
             TokenKind::Op(Operator::Mul) => Operator::Mul,
             TokenKind::Op(Operator::Div) => Operator::Div,
+            TokenKind::Op(Operator::Mod) => Operator::Mod,
             _ => panic!(),
         };
         let rhs = parse_primary(tokens);
@@ -343,6 +359,14 @@ pub fn parse_primary(tokens: &mut Peekable<Iter<'_, Token>>) -> AstNode {
                             Box::new(parse_expr(tokens)),
                         );
                         AstNode::Assignment(ident.clone(), Box::new(expr))
+                    }
+                    TokenKind::Dot => {
+                        tokens.next();
+                        let field = match &tokens.next().unwrap().kind {
+                            TokenKind::ID(f) => f,
+                            _ => panic!(),
+                        };
+                        AstNode::Access(ident.clone(), field.clone())
                     }
                     _ => AstNode::Variable(ident.clone()),
                 }
